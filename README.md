@@ -71,3 +71,4 @@ In plain text:
 Aristimunha, B., de Camargo, R.Y., Chevallier, S., Thomas, A.G., Lucena, O., Cardoso, J., Pinaya, W.H.L. and Dafflon, J., 2023, December. Synthetic Sleep EEG Signal Generation using Latent Diffusion Models. In NeurIPS 2023 Workshop DGM4H.
 
 
+# NeuIPS2023-EEG-Syn-Benchmark
