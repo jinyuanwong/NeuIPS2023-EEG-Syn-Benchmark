@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 from mne.datasets.sleep_physionet.age import fetch_data
 
-folder_data = Path("/data/")
+folder_data = Path("./data/")
 folder_data.mkdir(parents=True, exist_ok=True)
 
 mne.set_config("PHYSIONET_SLEEP_PATH", folder_data.as_posix())

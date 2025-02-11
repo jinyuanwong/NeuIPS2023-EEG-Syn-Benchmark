@@ -5,12 +5,12 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pynvml.smi import nvidia_smi
+# from pynvml.smi import nvidia_smi
 from tensorboardX import SummaryWriter
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 from util import log_ldm_sample_unconditioned, log_diffusion_sample_unconditioned
-
+from training.util import get_lr
 
 class Stage1Wrapper(nn.Module):
     """Wrapper for stage 1 model as a workaround for
@@ -344,6 +344,7 @@ def train_ldm(
         writer=writer_val,
         sample=False,
         scale_factor=scale_factor,
+        run_dir=run_dir,
     )
     print(f"epoch {start_epoch} val loss: {val_loss:.4f}")
 
@@ -372,10 +373,11 @@ def train_ldm(
                 writer=writer_val,
                 sample=True if (epoch + 1) % (eval_freq * 2) == 0 else False,
                 scale_factor=scale_factor,
+                run_dir=run_dir,
             )
 
             print(f"epoch {epoch + 1} val loss: {val_loss:.4f}")
-            print_gpu_memory_report()
+            # print_gpu_memory_report()
 
             # Save checkpoint
             checkpoint = {
@@ -461,6 +463,7 @@ def eval_ldm(
     writer: SummaryWriter,
     sample: bool = False,
     scale_factor: float = 1.0,
+    run_dir: Path = None,
 ) -> float:
     model.eval()
     raw_stage1 = stage1.module if hasattr(stage1, "module") else stage1
@@ -507,7 +510,8 @@ def eval_ldm(
             step=step,
             device=device,
             scale_factor=scale_factor,
-            images=images
+            images=images,
+            run_dir=run_dir,
         )
 
     return total_losses["loss"]

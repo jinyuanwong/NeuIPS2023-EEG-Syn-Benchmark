@@ -18,7 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from dataset.dataset import train_dataloader, valid_dataloader, get_trans
-from util import log_mlflow, log_reconstructions, log_spectral, ParseListAction, print_gpu_memory_report, setup_run_dir
+from util import log_mlflow, log_reconstructions, log_spectral, ParseListAction, setup_run_dir
 
 # print_config()
 
@@ -27,11 +27,12 @@ set_determinism(42)
 
 import torch
 
-if os.path.exists('/project'):
-    base_path = '/project/'
-    base_path_data = '/data/'
+if os.path.exists('./project'):
+    base_path = './project/'
+    base_path_data = './data/'
 else:
-    base_path = '/home/bru/PycharmProjects/DDPM-EEG/'
+    # base_path = '/home/bru/PycharmProjects/DDPM-EEG/'  # original path
+    base_path = os.getcwd()
     base_path_data = base_path
 
 class ParseListAction(argparse.Action):
@@ -46,35 +47,35 @@ def parse_args():
     parser.add_argument(
         "--config_file",
         type=str,
-        #default="/home/bru/PycharmProjects/DDPM-EEG/config/config_aekl_eeg.yaml",
-        default="/project/config/config_encoder_eeg.yaml",
+        default="./config/config_aekl_eeg.yaml",
+        # default="/project/config/config_encoder_eeg.yaml",
         help="Path to config file with all the training parameters needed",
     )
     parser.add_argument(
         "--path_train_ids",
         type=str,
-        #default="/home/bru/PycharmProjects/DDPM-EEG/data/ids/ids_sleep_edfx_cassette_train.csv",
-        default="/project/data/ids/ids_sleep_edfx_cassette_double_train.csv",
+        default="./data/ids/ids_sleep_edfx_cassette_train.csv",
+        # default="/project/data/ids/ids_sleep_edfx_cassette_double_train.csv",
     )
 
     parser.add_argument(
         "--path_valid_ids",
         type=str,
         #default="/home/bru/PycharmProjects/DDPM-EEG/data/ids/ids_sleep_edfx_cassette_valid.csv",
-        default="/project/data/ids/ids_sleep_edfx_cassette_double_valid.csv",
+        default="./data/ids/ids_sleep_edfx_cassette_valid.csv",
     )
     parser.add_argument(
         "--path_cached_data",
         type=str,
         #default="/home/bru/PycharmProjects/DDPM-EEG/data/pre",
-        default="/data/pre",
+        default="./data/pre",
     )
 
     parser.add_argument(
         "--path_pre_processed",
         type=str,
         #default="/home/bru/PycharmProjects/DDPM-EEG/data/pre-processed",
-        default="/data/physionet-sleep-data-npy",
+        default="./data/physionet-sleep-data-npy",
     )
 
     parser.add_argument(
@@ -100,10 +101,18 @@ def parse_args():
         choices=["edfx", "shhs", "shhsh"]
     )
     args = parser.parse_args()
+    
+    # 打印所有参数
+    print("\nArguments:")
+    for arg in vars(args):
+        print(f"{arg}: {getattr(args, arg)}")
+    print("\n")
+    
     return args
 
 
 def main(args):
+    print("Hello world!")
     config = OmegaConf.load(args.config_file)
 
     set_determinism(seed=config.train.seed)
@@ -119,6 +128,11 @@ def main(args):
     trans = get_trans(args.dataset)
     # Getting data loaders
     train_loader = train_dataloader(config=config, args=args, transforms_list=trans, dataset=args.dataset)
+    
+    # 打印数据形状
+    # sample_batch = next(iter(train_loader))
+    # print(f"\nInput data shape: {sample_batch['eeg'].shape}\n")
+    
     val_loader = valid_dataloader(config=config, args=args, transforms_list=trans, dataset=args.dataset)
 
     # Defining device
@@ -127,8 +141,8 @@ def main(args):
 
     # Defining model
     autoencoder_args = config.autoencoderkl.params
-    autoencoder_args['num_channels'] = args.num_channels
-    autoencoder_args['latent_channels'] = args.latent_channels
+    autoencoder_args['num_channels'] = [4, 16, 32] # config.autoencoderkl.params.num_channels# args.num_channels
+    autoencoder_args['latent_channels'] = 1 # config.autoencoderkl.params.latent_channels# args.latent_channels
 
     model = AutoencoderKL(**autoencoder_args)
     # including extra parameters for the discriminator from a dictionary
@@ -184,9 +198,8 @@ def main(args):
         print(f"No checkpoint found.")
 
     total_start = time.time()
-
+    print(f"first(train_loader): {first(train_loader)}")
     init_batch = first(train_loader)['eeg'].to(device)[:,:,36:-36]
-
     for epoch in range(start_epoch, n_epochs):
         model.train()
         discriminator.train()
@@ -199,7 +212,7 @@ def main(args):
 
         for step, batch in progress_bar:
             eeg_data = batch['eeg'].to(device)
-
+            print("Hello world! -> ", eeg_data.shape)
             optimizer_g.zero_grad(set_to_none=True)
             reconstruction, z_mu, z_sigma = model(eeg_data)
 
@@ -315,7 +328,7 @@ def main(args):
                         best_loss = val_loss
                         torch.save(model.state_dict(), str(run_dir / "best_model.pth"))
 
-                    print_gpu_memory_report()
+                    # print_gpu_memory_report()
                     # Save checkpoint
                     checkpoint = {
                         "epoch": epoch + 1,

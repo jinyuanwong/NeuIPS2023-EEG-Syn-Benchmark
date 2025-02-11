@@ -7,7 +7,7 @@ import mlflow.pytorch
 import mne
 from sklearn.metrics import roc_auc_score
 from typing import Tuple, Union
-from pynvml.smi import nvidia_smi
+# from pynvml.smi import nvidia_smi
 import joblib
 import matplotlib.pyplot as plt
 import mlflow.pytorch
@@ -28,14 +28,24 @@ class ParseListAction(argparse.Action):
 
 def setup_run_dir(config, args, base_path):
     # Create output directory
-
     output_dir = Path(base_path+config.train.output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
     # Extract number of channels from list from args
     # convert to string
     #num_channels = '-'.join(str(x) for x in args.num_channels)
-    run_dir = output_dir / str(config.train.run_dir+"_"+args.spe+"_"+args.dataset)
+    # run_dir = output_dir / str(config.train.run_dir+"_"+args.spe+"_"+args.dataset)  # original path
+    
+    # 添加默认值处理
+    run_dir_name = config.train.run_dir or "default_run"
+    spe_name = args.spe or "no_spe"
+    dataset_name = args.dataset or "no_dataset"
+    
+    run_dir = output_dir / f"{run_dir_name}_{spe_name}_{dataset_name}"
+    
+    # 打印 run_dir 的值
+    print(f"Run directory path: {run_dir}")
+    
     if run_dir.exists() and (run_dir / "checkpoint.pth").exists():
         resume = True
     else:
@@ -53,14 +63,14 @@ def recursive_items(dictionary):
             yield (key, value)
 
 
-def print_gpu_memory_report():
-    if torch.cuda.is_available():
-        nvsmi = nvidia_smi.getInstance()
-        data = nvsmi.DeviceQuery("memory.used, memory.total, utilization.gpu")["gpu"]
-        print("Memory report")
-        for i, data_by_rank in enumerate(data):
-            mem_report = data_by_rank["fb_memory_usage"]
-            print(f"gpu:{i} mem(%) {int(mem_report['used'] * 100.0 / mem_report['total'])}")
+# def print_gpu_memory_report():
+#     if torch.cuda.is_available():
+#         nvsmi = nvidia_smi.getInstance()
+#         data = nvsmi.DeviceQuery("memory.used, memory.total, utilization.gpu")["gpu"]
+#         print("Memory report")
+#         for i, data_by_rank in enumerate(data):
+#             mem_report = data_by_rank["fb_memory_usage"]
+#             print(f"gpu:{i} mem(%) {int(mem_report['used'] * 100.0 / mem_report['total'])}")
 
 
 def file_convert_to_mne(numpy_epoch, name='Original Dataset', id_channel=None):
@@ -234,6 +244,7 @@ def log_ldm_sample_unconditioned(
         device: torch.device,
         scale_factor: float = 1.0,
         images: torch.Tensor = None,
+        run_dir=None,
 ) -> None:
     latent = torch.randn((1,) + spatial_shape)
     latent = latent.to(device)
@@ -245,16 +256,13 @@ def log_ldm_sample_unconditioned(
     x_hat = stage1.model.decode(latent / scale_factor)
     x_hat_no_sacle = stage1.model.decode(latent)
 
-    log_spectral(images, x_hat, writer, step+1, name="SAMPLE_UNCONDITIONED",)
-
-    log_spectral(images, x_hat_no_sacle, writer, step+1, name="SAMPLE_NO_SCALE_UNCONDITIONED")
-
-    log_spectral(x_hat, x_hat_no_sacle, writer, step+1, name="SAMPLE_COMPARE_SCALE_UNCONDITIONED")
+    log_spectral(images, x_hat, writer, run_dir, step+1, name="SAMPLE_UNCONDITIONED")
+    log_spectral(images, x_hat_no_sacle, writer, run_dir, step+1, name="SAMPLE_NO_SCALE_UNCONDITIONED")
+    log_spectral(x_hat, x_hat_no_sacle, writer, run_dir, step+1, name="SAMPLE_COMPARE_SCALE_UNCONDITIONED")
 
     img_0 = x_hat[0, 0, :].cpu().numpy()
     fig = plt.figure(dpi=300)
     plt.plot(img_0)
-    #plt.axis("off")
     writer.add_figure("SAMPLE", fig, step)
 
 

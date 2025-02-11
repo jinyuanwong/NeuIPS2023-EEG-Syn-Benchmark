@@ -9,6 +9,7 @@ windows_size = 30 * sfreq
 
 def get_trans(dataset):
     if dataset == "edfx":
+        print("option a - line-12 reading edfx dataset Checked")
         transforms_list = Compose([LoadImageD(keys='eeg'),
                                   #EnsureChannelFirstD(keys='eeg'),
                                ScaleIntensityD(factor=1e6, keys='eeg'),  # Numeric stability
@@ -38,15 +39,17 @@ def get_datalist(
 
     """
     if dataset == "edfx":
-        final = ".npy"
+        final = "-PSG-Fpz-Cz.npy"
     else:
         final = ""
 
     data_dicts = []
     for index, row in df.iterrows():
+        path = f"{basepath}/{row['FILE_NAME']}{final}"
+        print(f"Trying to load: {path}")
         data_dicts.append(
             {
-                "eeg": f"{basepath}/{row['FILE_NAME_EEG']}{final}",
+                "eeg": path,
                 "subject": float(row["subject"]),
                 "night": float(row["night"]),
                 "age": float(row["age"]),

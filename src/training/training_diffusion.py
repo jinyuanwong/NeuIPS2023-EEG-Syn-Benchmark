@@ -5,12 +5,12 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from pynvml.smi import nvidia_smi
+# from pynvml.smi import nvidia_smi
 from tensorboardX import SummaryWriter
 from torch.cuda.amp import GradScaler, autocast
 from tqdm import tqdm
 from util import log_diffusion_sample_unconditioned
-from training.util import get_lr, print_gpu_memory_report
+from training.util import get_lr
 from generative.losses import JukeboxLoss
 # ----------------------------------------------------------------------------------------------------------------------
 # Latent Diffusion Model Unconditioned
@@ -87,7 +87,7 @@ def train_diffusion_(
             )
 
             print(f"epoch {epoch + 1} val loss: {val_loss:.4f}")
-            print_gpu_memory_report()
+            # print_gpu_memory_report()
 
             # Save checkpoint
             checkpoint = {
