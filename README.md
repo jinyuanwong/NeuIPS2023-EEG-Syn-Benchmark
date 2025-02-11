@@ -1,4 +1,5 @@
 <h1 align="center">
+  I rewrite the code of the original repository to be used for and FNIRS datasets.
   <br> [DGM4H Workshop@Neurips 2023] Synthetic Sleep EEG Signal Generation using Latent Diffusion-Models  <br>
 </h1>
 
