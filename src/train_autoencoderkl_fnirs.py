@@ -56,33 +56,6 @@ def parse_args():
         # default="/project/config/config_encoder_eeg.yaml",
         help="Path to config file with all the training parameters needed",
     )
-    # parser.add_argument(
-    #     "--path_train_ids",
-    #     type=str,
-    #     default="./data/ids/ids_sleep_edfx_cassette_train.csv",
-    #     # default="/project/data/ids/ids_sleep_edfx_cassette_double_train.csv",
-    # )
-
-    # parser.add_argument(
-    #     "--path_valid_ids",
-    #     type=str,
-    #     #default="/home/bru/PycharmProjects/DDPM-EEG/data/ids/ids_sleep_edfx_cassette_valid.csv",
-    #     default="./data/ids/ids_sleep_edfx_cassette_valid.csv",
-    # )
-    # parser.add_argument(
-    #     "--path_cached_data",
-    #     type=str,
-    #     #default="/home/bru/PycharmProjects/DDPM-EEG/data/pre",
-    #     default="./data/pre",
-    # )
-
-    # parser.add_argument(
-    #     "--path_pre_processed",
-    #     type=str,
-    #     #default="/home/bru/PycharmProjects/DDPM-EEG/data/pre-processed",
-    #     default="./data/physionet-sleep-data-npy",
-    # )
-
     parser.add_argument(
         "--num_channels",
         type=str, action=ParseListAction,
@@ -192,7 +165,6 @@ def main(args):
         autoencoder_args['num_channels'] = args.num_channels
     if args.latent_channels is not None:
         autoencoder_args['latent_channels'] = args.latent_channels
-
     model = AutoencoderKL(**autoencoder_args)
     # including extra parameters for the discriminator from a dictionary
     discriminator_dict = config.patchdiscriminator.params
@@ -262,16 +234,27 @@ def main(args):
         progress_bar.set_description(f"Epoch {epoch}")
 
         for step, batch in progress_bar:
+            # Move input data to CUDA device immediately after loading
             input_data = batch['input_data'].to(device)
-            print(f"input_data shape: {input_data.shape}")
+            # print(f"input_data shape: {input_data.shape}")
 
             
             optimizer_g.zero_grad(set_to_none=True)
             reconstruction, z_mu, z_sigma = model(input_data)
 
+            print("\n=== Model Output Information ===")
+            print(f"Input data shape: {input_data.shape}")
+            print(f"Reconstruction shape: {reconstruction.shape}")
+            print(f"z_mu (mean) shape: {z_mu.shape}, range: [{z_mu.min():.3f}, {z_mu.max():.3f}]")
+            print(f"z_sigma (std) shape: {z_sigma.shape}, range: [{z_sigma.min():.3f}, {z_sigma.max():.3f}]")
+
             recons_loss = l1_loss(reconstruction.float(), input_data.float())
 
+            print(f"\n=== Loss Information ===")
+            print(f"Reconstruction L1 Loss: {recons_loss.item():.4f}")
+
             recons_spectral = jukebox_loss(reconstruction.float(), input_data.float())
+            print(f"Jukebox (Spectral) Loss: {recons_spectral.item():.4f}")
 
             kl_loss = 0.5 * torch.sum(z_mu.pow(2) + z_sigma.pow(2) - torch.log(z_sigma.pow(2)) - 1, dim=[1])
             kl_loss = torch.sum(kl_loss) / kl_loss.shape[0]
@@ -315,8 +298,12 @@ def main(args):
 
             if (epoch + 1) % val_interval == 0:
                 with torch.no_grad():
-                    log_reconstructions(img=input_data,
-                                        recons=reconstruction,
+                    # For validation data, also move to CUDA device first
+                    input_data = batch['input_data'].to(device)
+                    reconstruction_input, _, _ = model(input_data)
+
+                    log_reconstructions(img=input_data.cpu(),
+                                        recons=reconstruction_input.cpu(),
                                         writer=writer_train,
                                         step=epoch+1,
                                         name="RECONSTRUCTION_TRAIN",
@@ -324,15 +311,18 @@ def main(args):
         
                     reconstruction_init, _, _ = model(init_batch)
 
-                    log_reconstructions(img=init_batch,
-                                        recons=reconstruction_init,
+                    log_reconstructions(img=init_batch.cpu(),
+                                        recons=reconstruction_init.cpu(),
                                         writer=writer_train,
                                         step=epoch+1,
                                         name="RECONSTRUCTION_TRAIN_OVERTIME",
                                         run_dir=run_dir)
 
-                    log_spectral(input=input_data,
-                                 recons=reconstruction_init,
+                    print("\nDebug before log_spectral:")
+                    print(f"input_data shape: {input_data.shape}")
+                    print(f"reconstruction_init shape: {reconstruction_init.shape}")
+                    log_spectral(input_data=input_data.cpu(),
+                                 recons=reconstruction_init.cpu(),
                                  writer=writer_val,
                                  step=epoch+1,
                                  name="SPECTROGRAM_OVERTIME", 
@@ -357,15 +347,15 @@ def main(args):
                     reconstruction_input, _, _ = model(input_data)
 
 
-                    log_reconstructions(img=input_data,
-                                        recons=reconstruction_input,
+                    log_reconstructions(img=input_data.cpu(),
+                                        recons=reconstruction_input.cpu(),
                                         writer=writer_val,
                                         step=epoch+1,
                                         name="RECONSTRUCTION_VAL",
                                         run_dir=run_dir)
 
-                    log_spectral(input=input_data,
-                                 recons=reconstruction_input,
+                    log_spectral(input_data=input_data.cpu(),
+                                 recons=reconstruction_input.cpu(),
                                  writer=writer_val,
                                  step=epoch+1,
                                  name="SPECTROGRAM_VAL", 
@@ -411,11 +401,6 @@ def main(args):
         val_loss=val_loss,
     )
     #wandb.finish()
-
-    # 在模型初始化后添加
-    print(f"Model channels: {model.num_channels}")  # 应该输出 [64, 128, 256]
-    print(f"Attention levels: {model.attention_levels}")  # 应该输出 [False, False, False]
-    assert len(model.num_channels) == len(model.attention_levels), "参数长度必须一致"
 
 
 if __name__ == "__main__":

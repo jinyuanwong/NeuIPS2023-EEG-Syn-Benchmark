@@ -28,7 +28,9 @@ class ParseListAction(argparse.Action):
 
 def setup_run_dir(config, args, base_path):
     # Create output directory
-    output_dir = Path(base_path+config.train.output_dir)
+    # output_dir = Path(base_path+config.train.output_dir)
+    output_dir = base_path + '/' + config.train.output_dir
+    output_dir = Path(output_dir)
     output_dir.mkdir(exist_ok=True, parents=True)
 
     # Extract number of channels from list from args
@@ -75,27 +77,41 @@ def recursive_items(dictionary):
 
 def file_convert_to_mne(numpy_epoch, name='Original Dataset', id_channel=None):
     """
-
     Parameters
     ----------
-    list_epoch: list
+    numpy_epoch: numpy array
     name: str
+    id_channel: int or None
 
     Returns
     -------
     epochs: mne.EpochsArray
     """
-
-    #numpy_epoch = np.concatenate(list_epoch)
+    # Add debug prints
+    print(f"\nDebug file_convert_to_mne:")
+    print(f"numpy_epoch shape: {numpy_epoch.shape}")
+    
     if id_channel is not None:
         ch_names = [f'EEG {id_channel}']
     else:
-        ch_names = 1
-    info = mne.create_info(ch_names, ch_types=['eeg'], sfreq=100)
+        ch_names = ['ch'+str(i) for i in range(numpy_epoch.shape[1])]  # Create channel names based on data shape
+    
+    print(f"Number of channels in data: {numpy_epoch.shape[1]}")
+    print(f"Channel names: {ch_names}")
+    
+    info = mne.create_info(ch_names, ch_types=['eeg']*len(ch_names), sfreq=100)
     info['description'] = name
+    
+    print(f"Number of channels in info: {len(info['ch_names'])}")
+    print(f"Info structure: {info}")
+
+    # Ensure data is in the correct format for MNE (epochs x channels x time)
+    if numpy_epoch.ndim == 3:
+        print(f"Data format: {numpy_epoch.shape} (epochs x channels x time)")
+    else:
+        print(f"Warning: Unexpected data dimensions: {numpy_epoch.shape}")
 
     epochs = mne.EpochsArray(numpy_epoch, info)
-
     return epochs
 
 
@@ -104,30 +120,50 @@ def get_epochs_spectrum(eeg_data, recons):
     sns.set_theme("poster")
     sns.set_style("white")
     
+    # Add detailed debug information
+    print("\n=== Debug get_epochs_spectrum ===")
+    print(f"Original data shape: {eeg_data.shape}")
+    print(f"Reconstruction shape: {recons.shape}")
+    
     eeg_data = eeg_data.cpu().numpy()
     recons = recons.cpu().numpy()
+    
+    print("\n=== After numpy conversion ===")
+    print(f"Original numpy shape: {eeg_data.shape}")
+    print(f"Reconstruction numpy shape: {recons.shape}")
 
+    # Create MNE epochs
     epoch_original = file_convert_to_mne(eeg_data, name='Original Dataset')
     epoch_recont = file_convert_to_mne(recons, name='Reco Dataset')
 
-    fig, ax = plt.subplots(1, 1, figsize=(10, 4))
-    legend_list = ['Origional', 'Reconstructed']
-    colours = ['red', 'blue']
+    # Compute PSD
+    print("Computing PSD...")
     spectral = epoch_original.compute_psd(fmax=12)
-    spectral.plot(axes=ax, color="red", spatial_colors=False,
-                  show=False, ci='range')
-
     spectral_rec = epoch_recont.compute_psd(fmax=12)
-    spectral_rec.plot(axes=ax, color="blue", spatial_colors=False,
-                  show=False, ci='range')
-
-    plt.legend(ax.lines, legend_list, loc='upper right', labelcolor=colours)
-
-    ax.set_yscale('log')
-
-    ax.set_title('PSD of the original dataset and synthetic data')
     
-
+    # Create a simple plot of the first subject's data
+    print("\n=== Creating plot ===")
+    fig, ax = plt.subplots(1, 1, figsize=(10, 4))
+    
+    # Plot mean PSD across channels for the first subject
+    mean_psd_orig = np.mean(spectral.get_data()[0], axis=0)  # Average across channels
+    mean_psd_rec = np.mean(spectral_rec.get_data()[0], axis=0)
+    freqs = spectral.freqs
+    
+    ax.plot(freqs, mean_psd_orig, 'r-', label='Original', alpha=0.8)
+    ax.plot(freqs, mean_psd_rec, 'b-', label='Reconstructed', alpha=0.8)
+    
+    ax.set_xlabel('Frequency (Hz)')
+    ax.set_ylabel('Power Spectral Density')
+    ax.set_yscale('log')
+    ax.legend()
+    ax.grid(True)
+    ax.set_title('Mean PSD across channels (first subject)')
+    
+    print(f"Spectral data shape: {spectral.get_data().shape}")
+    print(f"Spectral_rec data shape: {spectral_rec.get_data().shape}")
+    print("Plot creation completed")
+    
     return fig, spectral, spectral_rec
 
 
@@ -183,26 +219,54 @@ def log_reconstructions(
     np.save(str(run_dir / name_reconstr), recons)
 
 def log_spectral(
-        eeg: torch.Tensor,
+        input_data: torch.Tensor,
         recons: torch.Tensor,
         writer: SummaryWriter,
         run_dir,
         step: int,
         name: str = "SPECTRAL_RECONSTRUCTION",
 ):
-    fig, spectral, spectral_rec  = get_epochs_spectrum(
-        eeg,
-        recons,
-    )
-    writer.add_figure(f"{name}", fig, step)
-    name_original = f"original_spe_{name}_{step}.pkl"
-    name_reconstr = f"reconstr_spe_{name}_{step}.pkl"
-    fig_name = f"compare_{name}_{step}.pdf"
-    fig.savefig(str(run_dir / fig_name), bbox_inches='tight')
-    with open(str(run_dir / name_original), 'wb') as fo:  
-        joblib.dump(spectral, fo)
-    with open(str(run_dir / name_reconstr), 'wb') as fo:  
-        joblib.dump(spectral_rec, fo)
+    print(f"\n=== Starting log_spectral for {name} at step {step} ===")
+    
+    try:
+        # Get the figure and data
+        fig, spectral, spectral_rec = get_epochs_spectrum(
+            input_data,
+            recons,
+        )
+        print(f" spectral shape: {spectral.shape}")
+        print(f" spectral_rec shape: {spectral_rec.shape}")
+        
+        # Save to tensorboard
+        print("Adding figure to tensorboard...")
+        writer.add_figure(f"{name}", fig, step)
+        
+        # Save spectral data
+        name_original = f"original_spe_{name}_{step}.pkl"
+        name_reconstr = f"reconstr_spe_{name}_{step}.pkl"
+        
+        # Create figures directory if it doesn't exist
+        figures_dir = run_dir / "figures"
+        figures_dir.mkdir(exist_ok=True)
+        
+        # Save figure as PNG
+        fig_path = figures_dir / f"spectral_{name}_{step}.png"
+        print(f"Saving figure to {fig_path}")
+        plt.savefig(str(fig_path), dpi=300, bbox_inches='tight', format='png')
+        
+        print(f"Saving data files to {run_dir}")
+        with open(str(run_dir / name_original), 'wb') as fo:  
+            joblib.dump(spectral, fo)
+        with open(str(run_dir / name_reconstr), 'wb') as fo:  
+            joblib.dump(spectral_rec, fo)
+            
+        print("Save completed successfully")
+        
+    except Exception as e:
+        print(f"\nError in log_spectral: {str(e)}")
+        raise
+    finally:
+        plt.close(fig)
 
 def log_mlflow(
         model,
@@ -256,9 +320,9 @@ def log_ldm_sample_unconditioned(
     x_hat = stage1.model.decode(latent / scale_factor)
     x_hat_no_sacle = stage1.model.decode(latent)
 
-    log_spectral(images, x_hat, writer, run_dir, step+1, name="SAMPLE_UNCONDITIONED")
-    log_spectral(images, x_hat_no_sacle, writer, run_dir, step+1, name="SAMPLE_NO_SCALE_UNCONDITIONED")
-    log_spectral(x_hat, x_hat_no_sacle, writer, run_dir, step+1, name="SAMPLE_COMPARE_SCALE_UNCONDITIONED")
+    log_spectral(input_data=images, recons=x_hat, writer=writer, run_dir=run_dir, step=step+1, name="SAMPLE_UNCONDITIONED")
+    log_spectral(input_data=images, recons=x_hat_no_sacle, writer=writer, run_dir=run_dir, step=step+1, name="SAMPLE_NO_SCALE_UNCONDITIONED")
+    log_spectral(input_data=x_hat, recons=x_hat_no_sacle, writer=writer, run_dir=run_dir, step=step+1, name="SAMPLE_COMPARE_SCALE_UNCONDITIONED")
 
     img_0 = x_hat[0, 0, :].cpu().numpy()
     fig = plt.figure(dpi=300)
@@ -284,7 +348,7 @@ def log_diffusion_sample_unconditioned(
     with autocast(enabled=True):
         images = inferer.sample(input_noise=latent, diffusion_model=model, scheduler=scheduler)
 
-    log_spectral(eeg=images, recons=latent, writer=writer, step=step+1, name="SAMPLE_UNCONDITIONED", run_dir=run_dir)
+    log_spectral(input_data=images, recons=latent, writer=writer, step=step+1, name="SAMPLE_UNCONDITIONED", run_dir=run_dir)
 
     img_0 = latent[0, 0, :].cpu().numpy()
     fig = plt.figure(dpi=300)

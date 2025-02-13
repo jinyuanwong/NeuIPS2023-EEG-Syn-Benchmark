@@ -181,18 +181,18 @@ class Downsample(nn.Module):
     :param use_conv: a bool determining if a convolution is applied.
     """
 
-    def __init__(self, channels, use_conv, out_channels=None, padding=1):
+    def __init__(self, channels, use_conv, out_channels=None, kernel_size=3, padding=1):
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         if use_conv:
             self.op = nn.Conv1d(
-                self.channels, self.out_channels, 3, stride=2, padding=padding
-            )#TODO:Mudar
+                self.channels, self.out_channels, kernel_size=kernel_size, padding=padding, stride=2
+            )
         else:
             assert self.channels == self.out_channels
-            self.op = nn.AvgPool1d(kernel_size=2, stride=2)#TODO: Mudar
+            self.op = nn.AvgPool1d(kernel_size=2, stride=2)
 
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -206,15 +206,15 @@ class Upsample(nn.Module):
     :param use_conv: a bool determining if a convolution is applied.
     """
 
-    def __init__(self, channels, use_conv, out_channels=None, padding=1):
+    def __init__(self, channels, use_conv, out_channels=None, kernel_size=3, padding=1):
         super().__init__()
         self.channels = channels
         self.out_channels = out_channels or channels
         self.use_conv = use_conv
         if use_conv:
             self.conv = nn.Conv1d(
-                self.channels, self.out_channels, 3, padding=padding
-            )#TODO:Mudar
+                self.channels, self.out_channels, kernel_size=kernel_size, padding=padding
+            )
 
     def forward(self, x):
         assert x.shape[1] == self.channels
@@ -238,17 +238,7 @@ class ResBlock(TimestepBlock):
     :param down: if True, use this block for downsampling.
     """
 
-    def __init__(
-        self,
-        channels,
-        emb_channels,
-        dropout,
-        out_channels=None,
-        use_conv=False,
-        use_scale_shift_norm=False,
-        up=False,
-        down=False,
-    ):
+    def __init__(self, channels, emb_channels, dropout, out_channels=None, use_conv=False, use_scale_shift_norm=False, up=False, down=False, kernel_size=3, padding=1):
         super().__init__()
         self.channels = channels
         self.emb_channels = emb_channels
@@ -260,7 +250,7 @@ class ResBlock(TimestepBlock):
         self.in_layers = nn.Sequential(
             Normalize(channels),
             nn.SiLU(),
-            nn.Conv1d(channels, self.out_channels, 3, padding=1),
+            nn.Conv1d(channels, self.out_channels, kernel_size=kernel_size, padding=padding),
         )
 
         self.updown = up or down
@@ -288,7 +278,7 @@ class ResBlock(TimestepBlock):
             nn.SiLU(),
             nn.Dropout(p=dropout),
             zero_module(
-                nn.Conv1d(self.out_channels, self.out_channels, 3, padding=1)
+                nn.Conv1d(self.out_channels, self.out_channels, kernel_size=kernel_size, padding=padding)
             ),
         )
 
@@ -296,10 +286,10 @@ class ResBlock(TimestepBlock):
             self.skip_connection = nn.Identity()
         elif use_conv:
             self.skip_connection = nn.Conv1d(
-                channels, self.out_channels, 3, padding=1
-            )#TODO:Mudar
+                channels, self.out_channels, kernel_size=kernel_size, padding=padding
+            )
         else:
-            self.skip_connection = nn.Conv1d(channels, self.out_channels, 1)#TODO:Mudar
+            self.skip_connection = nn.Conv1d(channels, self.out_channels, 1)
 
     def forward(self, x, emb):
         return self._forward(x, emb)
@@ -346,6 +336,8 @@ class UNetModel(nn.Module):
         use_scale_shift_norm=False,
         resblock_updown=False,
         n_embed=None,
+        kernel_size=3,
+        padding=1,
         # custom support for prediction of discrete
         # ids into codebook of first stage vq model
     ):
@@ -368,6 +360,8 @@ class UNetModel(nn.Module):
         self.num_head_channels = num_head_channels
         self.num_heads_upsample = num_heads_upsample
         self.predict_codebook_ids = n_embed is not None
+        self.kernel_size = kernel_size
+        self.padding = padding
 
         time_embed_dim = model_channels * 4
         self.time_embed = nn.Sequential(
@@ -379,11 +373,23 @@ class UNetModel(nn.Module):
         if self.num_classes is not None:
             self.label_emb = nn.Embedding(num_classes, time_embed_dim)
 
+        self.conv_in = nn.Conv1d(
+            in_channels, 
+            model_channels, 
+            kernel_size=self.kernel_size,
+            padding=self.padding
+        )
+
         self.input_blocks = nn.ModuleList(
             [
                 TimestepEmbedSequential(
-                    nn.Conv1d(in_channels, model_channels, 3, padding=1)
-                )#TODO:Mudar
+                    nn.Conv1d(
+                        in_channels, 
+                        model_channels, 
+                        kernel_size=self.kernel_size,
+                        padding=self.padding
+                    )
+                )
             ]
         )
         self._feature_size = model_channels
@@ -399,6 +405,8 @@ class UNetModel(nn.Module):
                         dropout,
                         out_channels=mult * model_channels,
                         use_scale_shift_norm=use_scale_shift_norm,
+                        kernel_size=self.kernel_size,
+                        padding=self.padding,
                     )
                 ]
                 ch = mult * model_channels
@@ -425,9 +433,11 @@ class UNetModel(nn.Module):
                             out_channels=out_ch,
                             use_scale_shift_norm=use_scale_shift_norm,
                             down=True,
+                            kernel_size=self.kernel_size,
+                            padding=self.padding,
                         )
                         if resblock_updown
-                        else Downsample(ch, conv_resample, out_channels=out_ch)
+                        else Downsample(ch, conv_resample, out_channels=out_ch, kernel_size=self.kernel_size, padding=self.padding)
                     )
                 )
                 ch = out_ch
@@ -442,6 +452,8 @@ class UNetModel(nn.Module):
                 time_embed_dim,
                 dropout,
                 use_scale_shift_norm=use_scale_shift_norm,
+                kernel_size=self.kernel_size,
+                padding=self.padding,
             ),
             AttentionBlock(
                 ch,
@@ -453,6 +465,8 @@ class UNetModel(nn.Module):
                 time_embed_dim,
                 dropout,
                 use_scale_shift_norm=use_scale_shift_norm,
+                kernel_size=self.kernel_size,
+                padding=self.padding,
             ),
         )
         self._feature_size += ch
@@ -468,6 +482,8 @@ class UNetModel(nn.Module):
                         dropout,
                         out_channels=model_channels * mult,
                         use_scale_shift_norm=use_scale_shift_norm,
+                        kernel_size=self.kernel_size,
+                        padding=self.padding,
                     )
                 ]
                 ch = model_channels * mult
@@ -490,9 +506,11 @@ class UNetModel(nn.Module):
                             out_channels=out_ch,
                             use_scale_shift_norm=use_scale_shift_norm,
                             up=True,
+                            kernel_size=self.kernel_size,
+                            padding=self.padding,
                         )
                         if resblock_updown
-                        else Upsample(ch, conv_resample, out_channels=out_ch)
+                        else Upsample(ch, conv_resample, out_channels=out_ch, kernel_size=self.kernel_size, padding=self.padding)
                     )
                     ds //= 2
                 self.output_blocks.append(TimestepEmbedSequential(*layers))
@@ -501,13 +519,13 @@ class UNetModel(nn.Module):
         self.out = nn.Sequential(
             Normalize(ch),
             nn.SiLU(),
-            zero_module(nn.Conv1d(model_channels, out_channels, 3, padding=1)),
-        )#TODO:Mudar
+            zero_module(nn.Conv1d(model_channels, out_channels, kernel_size=self.kernel_size, padding=self.padding)),
+        )
         if self.predict_codebook_ids:
             self.id_predictor = nn.Sequential(
                 Normalize(ch),
                 nn.Conv1d(model_channels, n_embed, 1),
-            )#TODO:Mudar
+            )
 
     def forward(self, x, timesteps=None, context=None, y=None, **kwargs):
         """
@@ -540,12 +558,10 @@ class UNetModel(nn.Module):
 
         for module in self.output_blocks:
             h_pop =  hs.pop()
-            #print(h.shape, h_pop.shape)
             if (h.shape[2] != h_pop.shape[2]):
                 diff = abs(h.shape[2] - h_pop.shape[2])
                 print(f"after, {diff}")
                 print(h.shape, h_pop.shape)
-                #import pdb; pdb.set_trace()
                 h_pop = h_pop[:,:,:-diff]
                 print("before")
                 print(h.shape, h_pop.shape)
@@ -553,11 +569,7 @@ class UNetModel(nn.Module):
             h = th.cat([h,h_pop], dim=1)
             
             h = module(h, emb, context)
-            #import pdb; pdb.set_trace()
-        #print("oi")
         if self.predict_codebook_ids:
-            
-            # return self.out(h), self.id_predictor(h)
             return self.id_predictor(h)
         else:
             return self.out(h)
